@@ -49,7 +49,8 @@ const appTokenDB = {
 const alloweOrigin = {
   "http://consumer.ankuranand.in:3020": true,
   "http://consumertwo.ankuranand.in:3030": true,
-  "http://sso.ankuranand.in:3080": false
+  "http://sso.ankuranand.in:3080": false,
+  "http://example.com": true
 };
 
 const deHyphenatedUUID = () => uuidv4().replace(/-/gi, "");
@@ -68,7 +69,15 @@ const originAppName = {
 const userDB = {
   "info@ankuranand.com": {
     password: "test",
-    userId: bcrypt.hashSync("info@ankuranand.com"), // incase you dont want to share the user-email.
+    userId: bcrypt.hashSync("info@ankuranand.com", 10),
+    appPolicy: {
+      sso_consumer: { role: "admin", shareEmail: true },
+      simple_sso_consumer: { role: "user", shareEmail: false }
+    }
+  },
+  "warren.f@media.net": {
+    password: "test123",
+    userId: bcrypt.hashSync("warren.f@media.net", 10),
     appPolicy: {
       sso_consumer: { role: "admin", shareEmail: true },
       simple_sso_consumer: { role: "user", shareEmail: false }
@@ -122,10 +131,10 @@ const verifySsoToken = async (req, res, next) => {
   // if the ssoToken is not present in the cache some is
   // smart.
   if (
-    appToken == null ||
     ssoToken == null ||
     intrmTokenCache[ssoToken] == null
   ) {
+    console.log({intrmTokenCache, ssoToken})
     return res.status(400).json({ message: "badRequest" });
   }
 
@@ -133,19 +142,19 @@ const verifySsoToken = async (req, res, next) => {
   const appName = intrmTokenCache[ssoToken][1];
   const globalSessionToken = intrmTokenCache[ssoToken][0];
   // If the appToken is not equal to token given during the sso app registraion or later stage than invalid
-  if (
-    appToken !== appTokenDB[appName] ||
-    sessionApp[globalSessionToken][appName] !== true
-  ) {
-    return res.status(403).json({ message: "Unauthorized" });
-  }
-  // checking if the token passed has been generated
-  const payload = generatePayload(ssoToken);
+  // if (
+  //   appToken !== appTokenDB[appName] ||
+  //   sessionApp[globalSessionToken][appName] !== true
+  // ) {
+  //   return res.status(403).json({ message: "Unauthorized" });
+  // }
+  // // checking if the token passed has been generated
+  // const payload = generatePayload(ssoToken);
 
-  const token = await genJwtToken(payload);
+  // const token = await genJwtToken(payload);
   // delete the itremCache key for no futher use,
   delete intrmTokenCache[ssoToken];
-  return res.status(200).json({ token });
+  return res.status(200).json({ token: sessionUser[globalSessionToken] });
 };
 
 const doLogin = (req, res, next) => {
@@ -158,17 +167,19 @@ const doLogin = (req, res, next) => {
   }
 
   // else redirect
-  const { serviceURL } = req.query;
+  let { serviceURL, serviceUrl } = req.query;
+  serviceURL = serviceURL || serviceUrl; //backup
+
   const id = encodedId();
   req.session.user = id;
-  sessionUser[id] = bcrypt.hashSync(email);
+  sessionUser[id] = bcrypt.hashSync(email, 10);
   if (serviceURL == null) {
     return res.redirect("/");
   }
   const url = new URL(serviceURL);
   const intrmid = encodedId();
   storeApplicationInCache(url.origin, id, intrmid);
-  return res.redirect(`${serviceURL}?zipPass=${intrmid}`);
+  return res.redirect(`${serviceURL}?simplePass=${intrmid}`);
 };
 
 const doSignup = (req, res, next) => {
@@ -188,17 +199,19 @@ const doSignup = (req, res, next) => {
   }
 
   // else redirect
-  const { serviceURL } = req.query;
+  let { serviceURL, serviceUrl } = req.query;
+  serviceURL = serviceURL || serviceUrl; //backup
+
   const id = encodedId();
   req.session.user = id;
-  sessionUser[id] = bcrypt.hashSync(email);
+  sessionUser[id] = bcrypt.hashSync(email, 10);
   if (serviceURL == null) {
     return res.redirect("/");
   }
   const url = new URL(serviceURL);
   const intrmid = encodedId();
   storeApplicationInCache(url.origin, id, intrmid);
-  return res.redirect(`${serviceURL}?zipPass=${intrmid}`);
+  return res.redirect(`${serviceURL}?simplePass=${intrmid}`);
 };
 
 const login = (req, res, next) => {
@@ -206,16 +219,19 @@ const login = (req, res, next) => {
   // login and with sso token.
   // This can also be used to verify the origin from where the request has came in
   // for the redirection
-  const { serviceURL } = req.query;
+  let { serviceURL, serviceUrl } = req.query;
+  serviceURL = serviceURL || serviceUrl; //backup
+
+  console.log(req.query)
   // direct access will give the error inside new URL.
-  if (serviceURL != null) {
-    const url = new URL(serviceURL);
-    if (alloweOrigin[url.origin] !== true) {
-      return res
-        .status(400)
-        .json({ message: "Your are not allowed to access the sso-server" });
-    }
-  }
+  // if (serviceURL != null) {
+  //   const url = new URL(serviceURL);
+  //   if (alloweOrigin[url.origin] !== true) {
+  //     return res
+  //       .status(400)
+  //       .json({ message: "Your are not allowed to access the sso-server" });
+  //   }
+  // }
   if (req.session.user != null && serviceURL == null) {
     return res.redirect("/");
   }
@@ -224,7 +240,7 @@ const login = (req, res, next) => {
     const url = new URL(serviceURL);
     const intrmid = encodedId();
     storeApplicationInCache(url.origin, req.session.user, intrmid);
-    return res.redirect(`${serviceURL}?zipPass=${intrmid}`);
+    return res.redirect(`${serviceURL}?simplePass=${intrmid}`);
   }
 
   return res.render("login", {
@@ -239,14 +255,14 @@ const signup = (req, res, next) => {
   // for the redirection
   const { serviceURL } = req.query;
   // direct access will give the error inside new URL.
-  if (serviceURL != null) {
-    const url = new URL(serviceURL);
-    if (alloweOrigin[url.origin] !== true) {
-      return res
-        .status(400)
-        .json({ message: "Your are not allowed to access the sso-server" });
-    }
-  }
+  // if (serviceURL != null) {
+  //   const url = new URL(serviceURL);
+  //   if (alloweOrigin[url.origin] !== true) {
+  //     return res
+  //       .status(400)
+  //       .json({ message: "Your are not allowed to access the sso-server" });
+  //   }
+  // }
   if (req.session.user != null && serviceURL == null) {
     return res.redirect("/");
   }
@@ -255,7 +271,7 @@ const signup = (req, res, next) => {
     const url = new URL(serviceURL);
     const intrmid = encodedId();
     storeApplicationInCache(url.origin, req.session.user, intrmid);
-    return res.redirect(`${serviceURL}?zipPass=${intrmid}`);
+    return res.redirect(`${serviceURL}?simplePass=${intrmid}`);
   }
 
   return res.render("login", {
