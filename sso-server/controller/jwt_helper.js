@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { privateCert } = require("../config").keys;
 
-const ISSUER = "simple-sso";
+const ISSUER = "zip-pass";
 
 const genJwtToken = payload =>
   new Promise((resolve, reject) => {
